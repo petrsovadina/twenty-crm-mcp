@@ -18,6 +18,9 @@ export interface TwentyCrmClient {
 
 let client: TwentyCrmClient | null = null
 
+const RETRY_STATUSES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504])
+const RETRY_BACKOFF_MS: readonly number[] = [200, 800, 2000]
+
 function createClient(apiKey: string, baseUrl: string): TwentyCrmClient {
   const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
 
@@ -41,17 +44,40 @@ function createClient(apiKey: string, baseUrl: string): TwentyCrmClient {
       options.body = JSON.stringify(data)
     }
 
-    const response = await fetch(url, options)
+    // Retry only idempotent reads. Write ops fail fast — retrying without
+    // an Idempotency-Key risks duplicate creates / double updates.
+    const retryable = method === 'GET'
+    const maxAttempts = retryable ? RETRY_BACKOFF_MS.length + 1 : 1
 
-    if (!response.ok) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const response = await fetch(url, options)
+
+      if (response.ok) {
+        if (response.status === 204) return undefined
+        return response.json()
+      }
+
+      const isLastAttempt = attempt === maxAttempts - 1
+      if (
+        !isLastAttempt &&
+        retryable &&
+        RETRY_STATUSES.has(response.status)
+      ) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, RETRY_BACKOFF_MS[attempt]),
+        )
+        continue
+      }
+
       const errorText = await response.text()
       throw new Error(
         `Twenty CRM API ${method} ${endpoint}: HTTP ${response.status} — ${errorText}`,
       )
     }
 
-    if (response.status === 204) return undefined
-    return response.json()
+    throw new Error(
+      `Twenty CRM API ${method} ${endpoint}: exhausted ${maxAttempts} attempts`,
+    )
   }
 
   return {

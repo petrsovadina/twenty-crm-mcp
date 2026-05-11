@@ -972,15 +972,42 @@ function registerSchemaTools(
 
 // ─── Public API ─────────────────────────────────────────────
 
+/**
+ * When TWENTY_READ_ONLY=true, wrap server.registerTool so that any tool
+ * whose name starts with create_/update_/delete_ is silently skipped.
+ * Read tools (get_, list_, get_api_schema) remain registered.
+ */
+function wrapForReadOnly(server: McpServer): McpServer {
+  if (process.env.TWENTY_READ_ONLY !== 'true') return server
+
+  const writePrefixes = ['create_', 'update_', 'delete_']
+  return new Proxy(server, {
+    get(target, prop, receiver) {
+      if (prop === 'registerTool') {
+        return (name: string, ...rest: unknown[]) => {
+          if (writePrefixes.some((p) => name.startsWith(p))) return undefined
+          return (target.registerTool as (...args: unknown[]) => unknown).call(
+            target,
+            name,
+            ...rest,
+          )
+        }
+      }
+      return Reflect.get(target, prop, receiver)
+    },
+  })
+}
+
 export function registerTwentyCrmTools(server: McpServer) {
+  const target = wrapForReadOnly(server)
   const getClient = getTwentyCrmClient
-  registerPeopleTools(server, getClient)
-  registerCompanyTools(server, getClient)
-  registerNoteTools(server, getClient)
-  registerTaskTools(server, getClient)
-  registerOpportunityTools(server, getClient)
-  registerLeadTools(server, getClient)
-  registerSchemaTools(server, getClient)
+  registerPeopleTools(target, getClient)
+  registerCompanyTools(target, getClient)
+  registerNoteTools(target, getClient)
+  registerTaskTools(target, getClient)
+  registerOpportunityTools(target, getClient)
+  registerLeadTools(target, getClient)
+  registerSchemaTools(target, getClient)
 }
 
 export const twentyCrmConfig = {

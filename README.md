@@ -24,15 +24,23 @@ bun install
 
 Get API key: Twenty CRM → Settings → Playground → Generate API Key.
 
-## Local deployment
+## Run modes
 
-### Stdio server
+The same tool set runs in three modes:
+
+| Mode | When to use | Entry point |
+|------|-------------|-------------|
+| **Stdio** | Local Claude Desktop / Inspector | `bun run server.ts` |
+| **HTTP (Vercel)** | Remote MCP endpoint, multi-client | `bun run dev` → `/api/mcp` |
+| **Hub route** | Embedded in `vercel-mcp-hub` | (excluded; see Hub integration) |
+
+### Stdio (local)
 
 ```bash
-bun run server.ts
+bun run server
 ```
 
-Server runs on stdio. Connect via Claude Desktop or MCP Inspector.
+Server reads stdio. Connect via Claude Desktop or MCP Inspector.
 
 ### MCP Inspector
 
@@ -42,7 +50,7 @@ npx @modelcontextprotocol/inspector bun run server.ts
 
 Opens browser UI at `http://localhost:5173` with env vars from `.env`. Use to browse tools, call them manually, and inspect request/response shapes.
 
-### Claude Desktop
+### Claude Desktop (stdio)
 
 ```json
 {
@@ -58,6 +66,74 @@ Opens browser UI at `http://localhost:5173` with env vars from `.env`. Use to br
   }
 }
 ```
+
+## Vercel deploy (standalone HTTP MCP)
+
+### 1. Generate bearer token
+
+```bash
+openssl rand -base64 32
+```
+
+### 2. Deploy
+
+Push to GitHub and import via [vercel.com/new](https://vercel.com/new), or use the CLI:
+
+```bash
+npx vercel
+npx vercel --prod
+```
+
+### 3. Set env vars in Vercel project
+
+| Variable | Value |
+|----------|-------|
+| `TWENTY_API_KEY` | Twenty workspace API key |
+| `TWENTY_BASE_URL` | `https://<your-twenty>.com/rest` |
+| `MCP_BEARER_TOKEN` | Output from step 1 |
+| `TWENTY_READ_ONLY` | `false` (default) or `true` to disable write tools |
+
+Region defaults to `fra1` (see `vercel.json`). Change if Twenty is hosted elsewhere.
+
+### 4. Verify
+
+```bash
+# Healthcheck (no auth)
+curl https://<project>.vercel.app/api/health
+
+# Tools list (requires bearer)
+curl -X POST https://<project>.vercel.app/api/mcp \
+  -H "Authorization: Bearer <MCP_BEARER_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
+```
+
+### 5. Claude Desktop (remote)
+
+```json
+{
+  "mcpServers": {
+    "twenty-crm": {
+      "url": "https://<project>.vercel.app/api/mcp",
+      "headers": {
+        "Authorization": "Bearer <MCP_BEARER_TOKEN>"
+      }
+    }
+  }
+}
+```
+
+### Endpoints
+
+| Path | Method | Auth | Purpose |
+|------|--------|------|---------|
+| `/api/health` | GET | none | Healthcheck, returns `{status,service,version,timestamp}` |
+| `/api/mcp` | POST/GET/DELETE | Bearer | MCP JSON-RPC (streamable HTTP) |
+
+### Read-only deploys
+
+Set `TWENTY_READ_ONLY=true` to skip registration of `create_*`, `update_*`, `delete_*` tools. The server then exposes only 13 read tools (`get_*`, `list_*`, `get_api_schema`). Useful for agent contexts that must not mutate CRM data.
 
 ## Tests
 

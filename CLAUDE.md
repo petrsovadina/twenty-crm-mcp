@@ -29,11 +29,26 @@ API key: Twenty CRM Settings → Playground → Generate API Key.
 
 ## Architecture
 
-Two deployment modes for the same core implementation:
+Three deployment modes for the same core implementation:
 
-**Standalone** (`server.ts`) — stdio transport, for MCP Inspector and Claude Desktop. Creates `McpServer`, calls `registerTwentyCrmTools`, connects `StdioServerTransport`.
+**Stdio** (`server.ts`) — for MCP Inspector and Claude Desktop. Creates `McpServer`, calls `registerTwentyCrmTools`, connects `StdioServerTransport`.
 
-**Hub route** (`app/api/twenty-crm/v4/[transport]/route.ts`) — Next.js route handler for vercel-mcp-hub. Wraps the same `registerTwentyCrmTools` via `createMcpHandler` (from `mcp-handler` package), then gates it behind `withV4Auth` from `@/lib/auth/v4-middleware` (hub-provided, not in this repo).
+**Standalone Vercel** (`app/api/[transport]/route.ts`) — Next.js App Router route. Wraps `registerTwentyCrmTools` via `createMcpHandler` (from `mcp-handler` package). Authenticated by simple Bearer token check against `MCP_BEARER_TOKEN` env var. Exposes `/api/mcp` (HTTP/SSE).
+
+**Hub route** — not in this repo. To embed into `vercel-mcp-hub`, recreate the standalone route inside the hub and wrap with `withV4Auth` from `@/lib/auth/v4-middleware`.
+
+### Build/run scripts
+
+- `bun run dev` — Next.js dev server on `http://localhost:3000`
+- `bun run build` — Next.js production build
+- `bun run start` — start production server (after build)
+- `bun run server` — stdio MCP entry (unchanged)
+
+### Env vars
+
+- `TWENTY_API_KEY`, `TWENTY_BASE_URL` — Twenty workspace credentials (required)
+- `MCP_BEARER_TOKEN` — required when HTTP route is exposed; `/api/mcp` returns 500 if unset
+- `TWENTY_READ_ONLY=true` — skip registration of `create_*`/`update_*`/`delete_*` tools (proxy in `handler.ts:wrapForReadOnly`)
 
 ### Core files
 
